@@ -1,95 +1,79 @@
+import logging
 import asyncio
-import aiosqlite
-import os
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message
-from aiogram.filters import CommandStart, Command
-from aiohttp import web
+from aiogram.filters import Command
 from dotenv import load_dotenv
+import os
 
-# Load environment variables
+# Load env file
 load_dotenv()
 
-TOKEN = os.environ.get("7519236415:AAF61RW8e-sGPNkJKZR5JJDCkq6DZdShrnY")  # Ambil token dari Railway
-ALLOWED_TOPIC_ID = int(os.environ.get("ALLOWED_TOPIC_ID", 175))  # ID topik yang diperbolehkan
-PORT = int(os.environ.get("PORT", 5000))  # Railway menentukan port secara dinamis
-APP_URL = f"https://{os.environ.get('RAILWAY_STATIC_URL', 'localhost')}"  # URL Railway
+# Ambil token dan group ID dari environment variable
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ALLOWED_GROUP_ID = int(os.getenv("GROUP_ID"))
 
-bot = Bot(token=TOKEN)
+# Inisialisasi bot & dispatcher
+bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-app = web.Application()
 
-# Database initialization
-async def init_db():
-    async with aiosqlite.connect("game.db") as db:
-        await db.execute('''
-            CREATE TABLE IF NOT EXISTS players (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                gold INTEGER DEFAULT 100,
-                monarch INTEGER DEFAULT 0
-            )
-        ''')
-        await db.commit()
+# Dictionary sementara untuk data pemain (nanti bisa diganti DB)
+players = {}
 
-@dp.message(CommandStart()) 
-async def start_game(message: Message):
-    if message.message_thread_id and message.message_thread_id != ALLOWED_TOPIC_ID:
-        await message.reply("❌ Game ini hanya bisa dimainkan dalam satu topik tertentu!")
+# Middleware sederhana: hanya izinkan bot di grup tertentu
+@dp.message()
+async def restrict_group_access(message: Message):
+    if message.chat.type != "supergroup" or message.chat.id != ALLOWED_GROUP_ID:
+        return  # Abaikan pesan dari luar grup
+
+    await dp.feed_update(message)  # Teruskan ke handler berikutnya
+
+# Command /start
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    await message.reply("Welcome to Arises Monarch!\nPlease use /setnickname <your_nickname> to begin.")
+
+# Command /setnickname
+@dp.message(Command("setnickname"))
+async def cmd_setnickname(message: Message):
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply("Please provide a nickname: /setnickname <your_nickname>")
         return
 
+    nickname = args[1]
     user_id = message.from_user.id
-    username = message.from_user.username or "Unknown"
 
-    async with aiosqlite.connect("game.db") as db:
-        async with db.execute("SELECT * FROM players WHERE user_id = ?", (user_id,)) as cursor:
-            player = await cursor.fetchone()
+    players[user_id] = {
+        "nickname": nickname,
+        "level": 1,
+        "gold": 100,
+        "hp": 100,
+    }
 
-        if not player:
-            await db.execute("INSERT INTO players (user_id, username) VALUES (?, ?)", (user_id, username))
-            await db.commit()
-            await message.reply(f"👑 Selamat datang di *Arises Monarch*, @{username}!\n\nGunakan /help untuk melihat daftar perintah.")
-        else:
-            await message.reply(f"👋 Selamat datang kembali, @{username}! Lanjutkan petualanganmu! ⚔")
+    await message.reply(
+        f"Nickname set to **{nickname}**!\nUse /profile to check your status.",
+        parse_mode="Markdown"
+    )
 
-@dp.message(Command("help"))
-async def show_help(message: Message):
-    help_text = """
-🎮 Arises Monarch - Command List 🎮
-/profile - Lihat status karakter
-/inventory - Cek item yang kamu miliki
-/battle - Mulai pertarungan PvE
-/duel @username - Tantang pemain lain dalam PvP
-/shop - Beli item atau upgrade
-/dungeon - Masuk ke dungeon dan lawan boss
-/revive - Gunakan item revive jika mati
-/leaderboard - Lihat ranking pemain terbaik
-"""
-    await message.reply(help_text, parse_mode="Markdown")
+# Command /profile
+@dp.message(Command("profile"))
+async def cmd_profile(message: Message):
+    user_id = message.from_user.id
+    if user_id not in players:
+        await message.reply("You haven't set your nickname yet. Use /setnickname <nickname> first.")
+        return
 
-async def on_startup(app):
-    await bot.set_webhook(url=f"{APP_URL}/webhook/{TOKEN}")
-    await init_db()
+    profile = players[user_id]
+    await message.reply(
+        f"👤 *{profile['nickname']}*\n"
+        f"💪 Level: {profile['level']}\n"
+        f"💰 Gold: {profile['gold']}\n"
+        f"❤️ HP: {profile['hp']}",
+        parse_mode="Markdown"
+    )
 
-async def handle_webhook(request):
-    if request.match_info.get("token") != TOKEN:
-        return web.Response(status=403)
-    
-    request_data = await request.json()
-    update = types.Update(**request_data)
-    await dp.feed_update(bot=bot, update=update)
-    return web.Response()
-
+# Fungsi utama (entry point)
 async def main():
-    app.router.add_post(f"/webhook/{TOKEN}", handle_webhook)
-    app.on_startup.append(on_startup)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", PORT)  # Menggunakan PORT dari Railway
-    await site.start()
-    
-    await asyncio.Event().wait()
-
-if __name__ == '__main__':
-    asyncio.run(main())
+    logging.basicConfig(level=logging.INFO)
+    print("

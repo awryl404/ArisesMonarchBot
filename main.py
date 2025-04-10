@@ -76,4 +76,5 @@ async def cmd_profile(message: Message):
 # Fungsi utama (entry point)
 async def main():
     logging.basicConfig(level=logging.INFO)
-    print("
+    print("""Welcome to
+Arises Monarch Game Bot!""")

@@ -11,7 +11,11 @@ load_dotenv()
 
 # Ambil token dan group ID dari environment variable
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ALLOWED_GROUP_ID = int(os.getenv("GROUP_ID"))
+group_id = os.getenv("GROUP_ID")
+if group_id is None:
+    raise ValueError("GROUP_ID environment variable is missing.")
+ALLOWED_GROUP_ID = int(group_id)
+
 
 # Inisialisasi bot & dispatcher
 bot = Bot(token=BOT_TOKEN)
